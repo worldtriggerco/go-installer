@@ -7,6 +7,14 @@ APP_VERSION="v1.6.0"
 ARCHIVE_NAME="GO-v1.6.0.7z"
 ARCHIVE_URL="https://familynor.ir/GO-v1.6.0.7z"
 
+ARCHIVE_PASS="${1:-}"
+
+if [ -z "$ARCHIVE_PASS" ]; then
+  echo "Usage:"
+  echo "bash <(curl -fsSL URL) PASSWORD"
+  exit 1
+fi
+
 APP_DIR="$HOME/$APP_NAME"
 OLD_DIR="$HOME/GO-old"
 TMP_DIR="$HOME/GO-install-tmp"
@@ -14,18 +22,10 @@ EXTRACT_DIR="$TMP_DIR/GO-v1.6.0"
 
 echo "Installing GooseRelayVPN..."
 
-echo ""
-printf "Enter archive password: "
-stty -echo
-read ARCHIVE_PASS
-stty echo
-echo ""
-echo ""
-
 pkg update -y
 pkg install wget p7zip termux-api procps curl -y
 
-echo "Downloading $ARCHIVE_NAME..."
+echo "Downloading package..."
 
 rm -rf "$TMP_DIR"
 rm -f "$HOME/$ARCHIVE_NAME"
@@ -37,45 +37,41 @@ wget -O "$ARCHIVE_NAME" "$ARCHIVE_URL"
 
 if [ ! -s "$HOME/$ARCHIVE_NAME" ]; then
   echo "ERROR: download failed or file is empty."
-  unset ARCHIVE_PASS
   rm -rf "$TMP_DIR"
   rm -f "$HOME/$ARCHIVE_NAME"
   exit 1
 fi
 
-echo "Extracting encrypted 7z..."
+echo "Extracting package..."
 
-7z x -p"$ARCHIVE_PASS" "$HOME/$ARCHIVE_NAME" -o"$TMP_DIR" || {
+7z x -y -p"$ARCHIVE_PASS" "$HOME/$ARCHIVE_NAME" -o"$TMP_DIR" || {
   echo "ERROR: wrong password or extraction failed."
-  unset ARCHIVE_PASS
   rm -rf "$TMP_DIR"
   rm -f "$HOME/$ARCHIVE_NAME"
   exit 1
 }
 
-unset ARCHIVE_PASS
 rm -f "$HOME/$ARCHIVE_NAME"
 
 if [ ! -d "$EXTRACT_DIR" ]; then
   echo "ERROR: extracted folder not found: $EXTRACT_DIR"
-  echo "Your 7z file must contain folder: GO-v1.6.0"
   rm -rf "$TMP_DIR"
   exit 1
 fi
 
 if [ ! -f "$EXTRACT_DIR/goose-client" ]; then
-  echo "ERROR: goose-client not found inside $EXTRACT_DIR"
+  echo "ERROR: goose-client not found."
   rm -rf "$TMP_DIR"
   exit 1
 fi
 
 if [ ! -f "$EXTRACT_DIR/client_config.json" ]; then
-  echo "ERROR: client_config.json not found inside $EXTRACT_DIR"
+  echo "ERROR: client_config.json not found."
   rm -rf "$TMP_DIR"
   exit 1
 fi
 
-echo "Stopping old Goose if running..."
+echo "Stopping old Goose..."
 pkill -f goose-client 2>/dev/null || true
 termux-wake-unlock 2>/dev/null || true
 
@@ -94,7 +90,6 @@ rm -rf "$OLD_DIR"
 rm -f "$PREFIX/bin/goose"
 
 cd "$APP_DIR" || exit 1
-
 chmod +x goose-client
 
 cat > goose-on.sh << 'EOF'
