@@ -4,15 +4,15 @@ set -u
 
 APP_NAME="GO"
 APP_VERSION="v1.6.0"
-ZIP_NAME="GO-v1.6.0.zip"
-ZIP_URL="https://familynor.ir/GO-v1.6.0.zip"
+ARCHIVE_NAME="GO-v1.6.0.7z"
+ARCHIVE_URL="https://familynor.ir/GO-v1.6.0.7z"
 APP_DIR="$HOME/$APP_NAME"
 EXTRACT_DIR="$HOME/GO-v1.6.0"
 
 echo "Installing GooseRelayVPN..."
 
 pkg update -y
-pkg install wget unzip termux-api procps curl -y
+pkg install wget p7zip termux-api procps curl -y
 
 echo "Stopping old Goose if running..."
 pkill -f goose-client 2>/dev/null || true
@@ -21,30 +21,30 @@ termux-wake-unlock 2>/dev/null || true
 echo "Removing old files..."
 rm -rf "$APP_DIR"
 rm -rf "$EXTRACT_DIR"
-rm -f "$HOME/$ZIP_NAME"
+rm -f "$HOME/$ARCHIVE_NAME"
 rm -f "$PREFIX/bin/goose"
 
 cd "$HOME" || exit 1
 
-echo "Downloading $ZIP_NAME..."
-wget -O "$ZIP_NAME" "$ZIP_URL"
+echo "Downloading $ARCHIVE_NAME..."
+wget -O "$ARCHIVE_NAME" "$ARCHIVE_URL"
 
 echo ""
-echo "Extracting encrypted ZIP..."
-echo "Enter ZIP password when asked."
+echo "Extracting encrypted 7z..."
+echo "Enter archive password when asked."
 echo ""
 
-unzip "$ZIP_NAME"
+7z x "$ARCHIVE_NAME"
 
 if [ ! -d "$EXTRACT_DIR" ]; then
   echo "ERROR: extracted folder not found: $EXTRACT_DIR"
-  echo "Check your zip structure. It should contain folder: GO-v1.6.0"
+  echo "Your 7z file must contain folder: GO-v1.6.0"
   exit 1
 fi
 
 mv "$EXTRACT_DIR" "$APP_DIR"
 
-rm -f "$HOME/$ZIP_NAME"
+rm -f "$HOME/$ARCHIVE_NAME"
 
 cd "$APP_DIR" || exit 1
 
