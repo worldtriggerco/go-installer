@@ -6,57 +6,94 @@ APP_NAME="GO"
 APP_VERSION="v1.6.0"
 ARCHIVE_NAME="GO-v1.6.0.7z"
 ARCHIVE_URL="https://familynor.ir/GO-v1.6.0.7z"
+
 APP_DIR="$HOME/$APP_NAME"
-EXTRACT_DIR="$HOME/GO-v1.6.0"
+OLD_DIR="$HOME/GO-old"
+TMP_DIR="$HOME/GO-install-tmp"
+EXTRACT_DIR="$TMP_DIR/GO-v1.6.0"
 
 echo "Installing GooseRelayVPN..."
 
+echo ""
+printf "Enter archive password: "
+stty -echo
+read ARCHIVE_PASS
+stty echo
+echo ""
+echo ""
+
 pkg update -y
 pkg install wget p7zip termux-api procps curl -y
+
+echo "Downloading $ARCHIVE_NAME..."
+
+rm -rf "$TMP_DIR"
+rm -f "$HOME/$ARCHIVE_NAME"
+mkdir -p "$TMP_DIR"
+
+cd "$HOME" || exit 1
+
+wget -O "$ARCHIVE_NAME" "$ARCHIVE_URL"
+
+if [ ! -s "$HOME/$ARCHIVE_NAME" ]; then
+  echo "ERROR: download failed or file is empty."
+  unset ARCHIVE_PASS
+  rm -rf "$TMP_DIR"
+  rm -f "$HOME/$ARCHIVE_NAME"
+  exit 1
+fi
+
+echo "Extracting encrypted 7z..."
+
+7z x -p"$ARCHIVE_PASS" "$HOME/$ARCHIVE_NAME" -o"$TMP_DIR" || {
+  echo "ERROR: wrong password or extraction failed."
+  unset ARCHIVE_PASS
+  rm -rf "$TMP_DIR"
+  rm -f "$HOME/$ARCHIVE_NAME"
+  exit 1
+}
+
+unset ARCHIVE_PASS
+rm -f "$HOME/$ARCHIVE_NAME"
+
+if [ ! -d "$EXTRACT_DIR" ]; then
+  echo "ERROR: extracted folder not found: $EXTRACT_DIR"
+  echo "Your 7z file must contain folder: GO-v1.6.0"
+  rm -rf "$TMP_DIR"
+  exit 1
+fi
+
+if [ ! -f "$EXTRACT_DIR/goose-client" ]; then
+  echo "ERROR: goose-client not found inside $EXTRACT_DIR"
+  rm -rf "$TMP_DIR"
+  exit 1
+fi
+
+if [ ! -f "$EXTRACT_DIR/client_config.json" ]; then
+  echo "ERROR: client_config.json not found inside $EXTRACT_DIR"
+  rm -rf "$TMP_DIR"
+  exit 1
+fi
 
 echo "Stopping old Goose if running..."
 pkill -f goose-client 2>/dev/null || true
 termux-wake-unlock 2>/dev/null || true
 
-echo "Removing old files..."
-rm -rf "$APP_DIR"
-rm -rf "$EXTRACT_DIR"
-rm -f "$HOME/$ARCHIVE_NAME"
-rm -f "$PREFIX/bin/goose"
+echo "Replacing old installation..."
 
-cd "$HOME" || exit 1
+rm -rf "$OLD_DIR"
 
-echo "Downloading $ARCHIVE_NAME..."
-wget -O "$ARCHIVE_NAME" "$ARCHIVE_URL"
-
-echo ""
-echo "Extracting encrypted 7z..."
-echo "Enter archive password when asked."
-echo ""
-
-7z x "$ARCHIVE_NAME"
-
-if [ ! -d "$EXTRACT_DIR" ]; then
-  echo "ERROR: extracted folder not found: $EXTRACT_DIR"
-  echo "Your 7z file must contain folder: GO-v1.6.0"
-  exit 1
+if [ -d "$APP_DIR" ]; then
+  mv "$APP_DIR" "$OLD_DIR"
 fi
 
 mv "$EXTRACT_DIR" "$APP_DIR"
 
-rm -f "$HOME/$ARCHIVE_NAME"
+rm -rf "$TMP_DIR"
+rm -rf "$OLD_DIR"
+rm -f "$PREFIX/bin/goose"
 
 cd "$APP_DIR" || exit 1
-
-if [ ! -f "goose-client" ]; then
-  echo "ERROR: goose-client not found inside $APP_DIR"
-  exit 1
-fi
-
-if [ ! -f "client_config.json" ]; then
-  echo "ERROR: client_config.json not found inside $APP_DIR"
-  exit 1
-fi
 
 chmod +x goose-client
 
