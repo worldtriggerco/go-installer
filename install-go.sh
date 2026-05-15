@@ -132,6 +132,8 @@ while true; do
   echo "⠀⠀⠀⠀⢀⣠⣴⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠿⠋⣠⣿⣿⣿⠇⠀⠀⠀⠀⠀⠀"
   echo "⠀⠀⠰⢾⣿⣿⣿⡟⠿⠿⣿⣿⠿⠿⠛⠋⣁⣴⣾⣿⣿⠿⠋⠀⠀⠀⠀⠀⠀⠀"
   echo "⠀⠀⠀⠀⠉⠛⠻⠷⣶⣤⣤⣤⣤⣶⣾⣿⡿⠿⠛⠉⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀"
+  echo "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣠⢀⣶⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀"
+  echo "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠘⠛⠛⠛⠛⠛⠂⠀⠀⠀⠀"
   echo ""
   echo "======================================="
   echo "          GOOSE RELAY ONLINE"
@@ -174,11 +176,6 @@ while true; do
   echo "          NETWORK FAILURES  : $NETFAIL"
   echo "          RECOVERED         : $RECOVERED"
   echo ""
-
-  echo "LAST EVENTS:"
-  echo ""
-  grep -E "HTTP 403|blacklisted|network is unreachable|repeatedly failing|recovered" goose.log 2>/dev/null | tail -n 8
-
   echo ""
   echo "======================================="
   echo "Press CTRL + C to exit live monitor"
