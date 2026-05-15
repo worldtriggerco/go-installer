@@ -23,7 +23,7 @@ EXTRACT_DIR="$TMP_DIR/GO-v1.6.0"
 echo "Installing GooseRelayVPN..."
 
 pkg update -y
-pkg install wget p7zip termux-api procps curl -y
+pkg install wget p7zip termux-api procps curl grep sed coreutils -y
 
 echo "Downloading package..."
 
@@ -95,26 +95,6 @@ chmod +x goose-client
 cat > goose-on.sh << 'EOF'
 #!/data/data/com.termux/files/usr/bin/bash
 
-clear
-
-echo "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣠⣤⣄⡀⠀⠀⠀⠀⠀⠀"
-echo "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢠⣿⣿⣏⣹⣿⠄⠀⠀⠀⠀⠀"
-echo "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢸⣿⣿⣿⠿⠋⢠⣷⣦⠀⠀⠀"
-echo "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢸⣿⣿⡇⠀⠀⠀⠀⠀⠀⠀⠀"
-echo "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢸⣿⣿⣧⠀⠀⠀⠀⠀⠀⠀⠀"
-echo "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣿⣿⣿⣆⠀⠀⠀⠀⠀⠀⠀"
-echo "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣀⣿⣿⣿⣿⡆⠀⠀⠀⠀⠀⠀"
-echo "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣤⣶⣿⣿⣿⠛⣿⣿⣿⣧⠀⠀⠀⠀⠀⠀"
-echo "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣠⣾⣿⣿⣿⣿⣿⣿⡇⢸⣿⣿⣿⠀⠀⠀⠀⠀⠀"
-echo "⠀⠀⠀⠀⠀⠀⠀⠀⣠⣴⣿⣿⣿⣿⣿⣿⣿⣿⣿⠇⢸⣿⣿⡿⠀⠀⠀⠀⠀⠀"
-echo "⠀⠀⠀⠀⢀⣠⣴⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠿⠋⣠⣿⣿⣿⠇⠀⠀⠀⠀⠀⠀"
-echo "⠀⠀⠰⢾⣿⣿⣿⡟⠿⠿⣿⣿⠿⠿⠛⠋⣁⣴⣾⣿⣿⠿⠋⠀⠀⠀⠀⠀⠀⠀"
-echo "⠀⠀⠀⠀⠉⠛⠻⠷⣶⣤⣤⣤⣤⣶⣾⣿⡿⠿⠛⠉⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀"
-echo "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣠⢀⣶⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀"
-echo "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠘⠛⠛⠛⠛⠛⠂⠀⠀⠀⠀"
-echo ""
-echo "Starting GooseRelay..."
-
 cd "$HOME/GO" || exit 1
 
 termux-wake-lock 2>/dev/null || true
@@ -125,7 +105,33 @@ nohup ./goose-client -config client_config.json > goose.log 2>&1 &
 
 sleep 4
 
-if pgrep -f goose-client >/dev/null; then
+if ! pgrep -f goose-client >/dev/null; then
+  clear
+  echo ""
+  echo "======================================="
+  echo "            GOOSE FAILED"
+  echo "======================================="
+  echo ""
+  tail -n 40 goose.log 2>/dev/null
+  exit 1
+fi
+
+while true; do
+  clear
+
+  echo "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣠⣤⣄⡀⠀⠀⠀⠀⠀⠀"
+  echo "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢠⣿⣿⣏⣹⣿⠄⠀⠀⠀⠀⠀"
+  echo "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢸⣿⣿⣿⠿⠋⢠⣷⣦⠀⠀⠀"
+  echo "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢸⣿⣿⡇⠀⠀⠀⠀⠀⠀⠀⠀"
+  echo "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢸⣿⣿⣧⠀⠀⠀⠀⠀⠀⠀⠀"
+  echo "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣿⣿⣿⣆⠀⠀⠀⠀⠀⠀⠀"
+  echo "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣀⣿⣿⣿⣿⡆⠀⠀⠀⠀⠀⠀"
+  echo "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣤⣶⣿⣿⣿⠛⣿⣿⣿⣧⠀⠀⠀⠀⠀⠀"
+  echo "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣠⣾⣿⣿⣿⣿⣿⣿⡇⢸⣿⣿⣿⠀⠀⠀⠀⠀⠀"
+  echo "⠀⠀⠀⠀⠀⠀⠀⠀⣠⣴⣿⣿⣿⣿⣿⣿⣿⣿⣿⠇⢸⣿⣿⡿⠀⠀⠀⠀⠀⠀"
+  echo "⠀⠀⠀⠀⢀⣠⣴⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠿⠋⣠⣿⣿⣿⠇⠀⠀⠀⠀⠀⠀"
+  echo "⠀⠀⠰⢾⣿⣿⣿⡟⠿⠿⣿⣿⠿⠿⠛⠋⣁⣴⣾⣿⣿⠿⠋⠀⠀⠀⠀⠀⠀⠀"
+  echo "⠀⠀⠀⠀⠉⠛⠻⠷⣶⣤⣤⣤⣤⣶⣾⣿⡿⠿⠛⠉⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀"
   echo ""
   echo "======================================="
   echo "          GOOSE RELAY ONLINE"
@@ -135,17 +141,53 @@ if pgrep -f goose-client >/dev/null; then
   echo ""
   echo "          127.0.0.1:1080"
   echo ""
-  echo "Use: goose logs"
+
+  STATS_LINE="$(grep 'endpoints=' goose.log 2>/dev/null | tail -n 1)"
+
+  if echo "$STATS_LINE" | grep -q 'endpoints='; then
+    ENDPOINTS="$(echo "$STATS_LINE" | sed -n 's/.*endpoints=\([0-9]*\/[0-9]*\).*/\1/p')"
+    ONLINE="$(echo "$ENDPOINTS" | cut -d/ -f1)"
+    TOTAL="$(echo "$ENDPOINTS" | cut -d/ -f2)"
+    OFFLINE=$((TOTAL - ONLINE))
+
+    echo "GOOGLE ACCOUNTS STATUS:"
+    echo ""
+    echo "          WORKING : $ONLINE / $TOTAL"
+    echo "          OFFLINE : $OFFLINE / $TOTAL"
+    echo ""
+  else
+    echo "GOOGLE ACCOUNTS STATUS:"
+    echo ""
+    echo "          WAITING FOR STATS..."
+    echo ""
+  fi
+
+  FAIL403="$(grep -c 'HTTP 403' goose.log 2>/dev/null || true)"
+  BLACKLISTED="$(grep -c 'blacklisted' goose.log 2>/dev/null || true)"
+  NETFAIL="$(grep -c 'network is unreachable' goose.log 2>/dev/null || true)"
+  RECOVERED="$(grep -c 'recovered' goose.log 2>/dev/null || true)"
+
+  echo "ERROR COUNTERS:"
   echo ""
-else
+  echo "          HTTP 403          : $FAIL403"
+  echo "          BLACKLISTED       : $BLACKLISTED"
+  echo "          NETWORK FAILURES  : $NETFAIL"
+  echo "          RECOVERED         : $RECOVERED"
+  echo ""
+
+  echo "LAST EVENTS:"
+  echo ""
+  grep -E "HTTP 403|blacklisted|network is unreachable|repeatedly failing|recovered" goose.log 2>/dev/null | tail -n 8
+
   echo ""
   echo "======================================="
-  echo "            GOOSE FAILED"
+  echo "Press CTRL + C to exit live monitor"
+  echo "Goose keeps running in background"
   echo "======================================="
   echo ""
-  echo "Last logs:"
-  tail -n 40 goose.log 2>/dev/null
-fi
+
+  sleep 5
+done
 EOF
 
 cat > goose-off.sh << 'EOF'
@@ -209,6 +251,9 @@ case "$1" in
     ;;
   logs)
     tail -f "$HOME/GO/goose.log"
+    ;;
+  monitor)
+    "$HOME/GO/goose-on.sh"
     ;;
   test)
     curl --socks5-hostname 127.0.0.1:1080 https://ifconfig.me
