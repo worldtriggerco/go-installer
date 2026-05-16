@@ -16,6 +16,7 @@ if [ -z "$ARCHIVE_PASS" ]; then
 fi
 
 APP_DIR="$HOME/$APP_NAME"
+PASS_FILE="$APP_DIR/.archive_pass"
 OLD_DIR="$HOME/GO-old"
 TMP_DIR="$HOME/GO-install-tmp"
 EXTRACT_DIR="$TMP_DIR/GO-v1.6.0"
@@ -84,6 +85,9 @@ if [ -d "$APP_DIR" ]; then
 fi
 
 mv "$EXTRACT_DIR" "$APP_DIR"
+
+echo "$ARCHIVE_PASS" > "$PASS_FILE"
+chmod 600 "$PASS_FILE"
 
 rm -rf "$TMP_DIR"
 rm -rf "$OLD_DIR"
@@ -219,7 +223,98 @@ echo "======================================="
 echo ""
 EOF
 
-chmod +x goose-on.sh goose-off.sh
+cat > goose-update.sh << 'EOF'
+#!/data/data/com.termux/files/usr/bin/bash
+
+set -u
+
+APP_NAME="GO"
+APP_VERSION="v1.6.0"
+ARCHIVE_NAME="GO-v1.6.0.7z"
+ARCHIVE_URL="https://familynor.ir/GO-v1.6.0.7z"
+
+APP_DIR="$HOME/$APP_NAME"
+PASS_FILE="$APP_DIR/.archive_pass"
+TMP_DIR="$HOME/GO-update-tmp"
+EXTRACT_DIR="$TMP_DIR/GO-v1.6.0"
+
+clear
+echo "Updating GooseRelayVPN..."
+
+if [ ! -f "$PASS_FILE" ]; then
+  echo "ERROR: saved password not found."
+  echo "Please reinstall once with password."
+  exit 1
+fi
+
+ARCHIVE_PASS="$(cat "$PASS_FILE")"
+
+cd "$HOME" || exit 1
+
+rm -rf "$TMP_DIR"
+rm -f "$HOME/$ARCHIVE_NAME"
+mkdir -p "$TMP_DIR"
+
+echo "Downloading latest package..."
+wget -O "$ARCHIVE_NAME" "$ARCHIVE_URL"
+
+if [ ! -s "$HOME/$ARCHIVE_NAME" ]; then
+  echo "ERROR: download failed or file is empty."
+  rm -rf "$TMP_DIR"
+  rm -f "$HOME/$ARCHIVE_NAME"
+  exit 1
+fi
+
+echo "Extracting package..."
+
+7z x -y -p"$ARCHIVE_PASS" "$HOME/$ARCHIVE_NAME" -o"$TMP_DIR" || {
+  echo "ERROR: wrong saved password or extraction failed."
+  rm -rf "$TMP_DIR"
+  rm -f "$HOME/$ARCHIVE_NAME"
+  exit 1
+}
+
+rm -f "$HOME/$ARCHIVE_NAME"
+
+if [ ! -d "$EXTRACT_DIR" ]; then
+  echo "ERROR: extracted folder not found: $EXTRACT_DIR"
+  rm -rf "$TMP_DIR"
+  exit 1
+fi
+
+if [ ! -f "$EXTRACT_DIR/goose-client" ]; then
+  echo "ERROR: goose-client not found."
+  rm -rf "$TMP_DIR"
+  exit 1
+fi
+
+if [ ! -f "$EXTRACT_DIR/client_config.json" ]; then
+  echo "ERROR: client_config.json not found."
+  rm -rf "$TMP_DIR"
+  exit 1
+fi
+
+echo "Stopping Goose..."
+pkill -f goose-client 2>/dev/null || true
+termux-wake-unlock 2>/dev/null || true
+
+echo "Replacing files..."
+
+cp -f "$EXTRACT_DIR/goose-client" "$APP_DIR/goose-client"
+cp -f "$EXTRACT_DIR/client_config.json" "$APP_DIR/client_config.json"
+
+chmod +x "$APP_DIR/goose-client"
+
+rm -rf "$TMP_DIR"
+
+echo ""
+echo "Update complete"
+echo "Run:"
+echo "goose on"
+echo ""
+EOF
+
+chmod +x goose-on.sh goose-off.sh goose-update.sh
 
 mkdir -p "$PREFIX/bin"
 
@@ -237,6 +332,9 @@ case "$1" in
     "$HOME/GO/goose-off.sh"
     sleep 1
     "$HOME/GO/goose-on.sh"
+    ;;
+  update)
+    "$HOME/GO/goose-update.sh"
     ;;
   status)
     if pgrep -f goose-client >/dev/null; then
@@ -260,6 +358,7 @@ case "$1" in
     echo "goose on"
     echo "goose off"
     echo "goose restart"
+    echo "goose update"
     echo "goose status"
     echo "goose logs"
     echo "goose test"
@@ -274,6 +373,8 @@ echo "Installation complete"
 echo "Commands:"
 echo "goose on"
 echo "goose off"
+echo "goose restart"
+echo "goose update"
 echo "goose status"
 echo "goose logs"
 echo "goose test"
