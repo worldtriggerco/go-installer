@@ -24,7 +24,7 @@ EXTRACT_DIR="$TMP_DIR/GO-v1.6.0"
 echo "Installing GooseRelayVPN..."
 
 pkg update -y
-pkg install wget p7zip termux-api procps curl grep sed coreutils iproute2 -y
+pkg install wget p7zip termux-api procps curl grep sed coreutils iproute2 socat -y
 
 echo "Downloading package..."
 
@@ -75,6 +75,9 @@ fi
 echo "Stopping old Goose..."
 pkill -f goose-client 2>/dev/null || true
 pkill -f goose-watch.sh 2>/dev/null || true
+pkill -f goose-gate.sh 2>/dev/null || true
+pkill -f goose-handle.sh 2>/dev/null || true
+pkill -f "socat.*1080" 2>/dev/null || true
 termux-wake-unlock 2>/dev/null || true
 
 echo "Replacing old installation..."
@@ -97,6 +100,43 @@ rm -f "$PREFIX/bin/goose"
 cd "$APP_DIR" || exit 1
 chmod +x goose-client
 
+cat > goose-handle.sh << 'EOF'
+#!/data/data/com.termux/files/usr/bin/bash
+
+cd "$HOME/GO" || exit 1
+
+touch goose.log
+
+if ! pgrep -f goose-client >/dev/null; then
+  termux-wake-lock 2>/dev/null || true
+  echo "$(date '+%H:%M:%S') AUTO START - connection received on 1080" >> goose.log
+  nohup ./goose-client -config client_config.json >> goose.log 2>&1 &
+fi
+
+TRIES=0
+while [ "$TRIES" -lt 20 ]; do
+  if ss -ltn 2>/dev/null | grep -q ':1081'; then
+    break
+  fi
+  TRIES=$((TRIES + 1))
+  sleep 0.5
+done
+
+exec socat STDIO TCP:127.0.0.1:1081
+EOF
+
+cat > goose-gate.sh << 'EOF'
+#!/data/data/com.termux/files/usr/bin/bash
+
+cd "$HOME/GO" || exit 1
+
+pkill -f "socat.*1080" 2>/dev/null || true
+
+echo "$(date '+%H:%M:%S') GATE STARTED - listening on 127.0.0.1:1080, forwarding to Goose 1081" >> goose.log
+
+exec socat TCP-LISTEN:1080,bind=127.0.0.1,reuseaddr,fork EXEC:"$HOME/GO/goose-handle.sh"
+EOF
+
 cat > goose-watch.sh << 'EOF'
 #!/data/data/com.termux/files/usr/bin/bash
 
@@ -109,16 +149,10 @@ LAST_ACTIVE_FILE="$HOME/GO/.last_socks_activity"
 date +%s > "$LAST_ACTIVE_FILE"
 
 while true; do
-  ACTIVE_CONN="$(ss -tn 2>/dev/null | grep ':1080' | grep ESTAB | wc -l | tr -d ' ')"
+  GATE_ACTIVE="$(ss -tn 2>/dev/null | grep -E ':1080|:1081' | grep ESTAB | wc -l | tr -d ' ')"
 
-  if [ "$ACTIVE_CONN" -gt 0 ]; then
+  if [ "$GATE_ACTIVE" -gt 0 ]; then
     date +%s > "$LAST_ACTIVE_FILE"
-
-    if ! pgrep -f goose-client >/dev/null; then
-      termux-wake-lock 2>/dev/null || true
-      echo "$(date '+%H:%M:%S') AUTO START - SOCKS activity detected" >> goose.log
-      nohup ./goose-client -config client_config.json >> goose.log 2>&1 &
-    fi
   else
     LAST_ACTIVE="$(cat "$LAST_ACTIVE_FILE" 2>/dev/null || echo 0)"
     NOW_TIME="$(date +%s)"
@@ -126,7 +160,7 @@ while true; do
 
     if [ "$IDLE_TIME" -ge "$IDLE_LIMIT_SECONDS" ]; then
       if pgrep -f goose-client >/dev/null; then
-        echo "$(date '+%H:%M:%S') AUTO STOP - no SOCKS activity for 10 minutes" >> goose.log
+        echo "$(date '+%H:%M:%S') AUTO STOP - no active SOCKS connection for 10 minutes" >> goose.log
         pkill -f goose-client 2>/dev/null || true
         termux-wake-unlock 2>/dev/null || true
       fi
@@ -142,24 +176,27 @@ cat > goose-on.sh << 'EOF'
 
 cd "$HOME/GO" || exit 1
 
-termux-wake-lock 2>/dev/null || true
 pkill -f goose-client 2>/dev/null || true
 pkill -f goose-watch.sh 2>/dev/null || true
+pkill -f goose-gate.sh 2>/dev/null || true
+pkill -f goose-handle.sh 2>/dev/null || true
+pkill -f "socat.*1080" 2>/dev/null || true
+
 rm -f goose.log
 rm -f .last_socks_activity
 
 date +%s > "$HOME/GO/.last_socks_activity"
 
-nohup ./goose-client -config client_config.json > goose.log 2>&1 &
+nohup ./goose-gate.sh > /dev/null 2>&1 &
 nohup ./goose-watch.sh > /dev/null 2>&1 &
 
-sleep 4
+sleep 2
 
-if ! pgrep -f goose-client >/dev/null; then
+if ! pgrep -f goose-gate.sh >/dev/null && ! ss -ltn 2>/dev/null | grep -q ':1080'; then
   clear
   echo ""
   echo "======================================="
-  echo "            GOOSE FAILED"
+  echo "            GOOSE GATE FAILED"
   echo "======================================="
   echo ""
   tail -n 40 goose.log 2>/dev/null
@@ -186,32 +223,38 @@ while true; do
   echo "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠘⠛⠛⠛⠛⠛⠂⠀⠀⠀⠀"
   echo ""
   echo "======================================="
-  echo "          GOOSE RELAY ONLINE"
+  echo "          GOOSE RELAY GATE ONLINE"
   echo "======================================="
   echo ""
-  echo "SOCKS5 ADDRESS:"
+  echo "PUBLIC SOCKS5 ADDRESS:"
   echo ""
   echo "          127.0.0.1:1080"
   echo ""
+  echo "GOOSE INTERNAL SOCKS:"
+  echo ""
+  echo "          127.0.0.1:1081"
+  echo ""
 
-  if pgrep -f goose-client >/dev/null; then
-    echo "CLIENT STATUS:"
-    echo ""
-    echo "          RUNNING"
-    echo ""
+  if ss -ltn 2>/dev/null | grep -q ':1080'; then
+    GATE_STATUS="RUNNING"
   else
-    echo "CLIENT STATUS:"
-    echo ""
-    echo "          AUTO STOPPED - WAITING FOR SOCKS USE"
-    echo ""
+    GATE_STATUS="OFF"
   fi
 
-  ACTIVE_CONN="$(ss -tn 2>/dev/null | grep ':1080' | grep ESTAB | wc -l | tr -d ' ')"
+  if pgrep -f goose-client >/dev/null; then
+    CLIENT_STATUS="RUNNING"
+  else
+    CLIENT_STATUS="AUTO STOPPED - WAITING FOR SOCKS USE"
+  fi
 
-  echo "SOCKS USAGE:"
+  ACTIVE_CONN="$(ss -tn 2>/dev/null | grep -E ':1080|:1081' | grep ESTAB | wc -l | tr -d ' ')"
+
+  echo "AUTO CONTROL STATUS:"
   echo ""
-  echo "          ACTIVE CONNECTIONS : $ACTIVE_CONN"
-  echo "          AUTO STOP AFTER    : 10 IDLE MINUTES"
+  echo "          GATE STATUS       : $GATE_STATUS"
+  echo "          CLIENT STATUS     : $CLIENT_STATUS"
+  echo "          ACTIVE CONNECTIONS: $ACTIVE_CONN"
+  echo "          AUTO STOP AFTER   : 10 IDLE MINUTES"
   echo ""
 
   STATS_LINE="$(grep 'endpoints=' goose.log 2>/dev/null | tail -n 1)"
@@ -249,8 +292,8 @@ while true; do
   echo ""
   echo "======================================="
   echo "Press CTRL + C to exit live monitor"
-  echo "Goose keeps running in background"
-  echo "Auto stop/start is enabled"
+  echo "Gate keeps running in background"
+  echo "Goose client auto starts/stops"
   echo "======================================="
   echo ""
 
@@ -265,6 +308,9 @@ clear
 
 pkill -f goose-client 2>/dev/null || true
 pkill -f goose-watch.sh 2>/dev/null || true
+pkill -f goose-gate.sh 2>/dev/null || true
+pkill -f goose-handle.sh 2>/dev/null || true
+pkill -f "socat.*1080" 2>/dev/null || true
 termux-wake-unlock 2>/dev/null || true
 
 echo "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⡤⠒⠒⠢⢄⡀⠀⠀⢠⡏⠉⠉⠉⠑⠒⠤⣀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀"
@@ -365,6 +411,9 @@ fi
 echo "Stopping Goose..."
 pkill -f goose-client 2>/dev/null || true
 pkill -f goose-watch.sh 2>/dev/null || true
+pkill -f goose-gate.sh 2>/dev/null || true
+pkill -f goose-handle.sh 2>/dev/null || true
+pkill -f "socat.*1080" 2>/dev/null || true
 termux-wake-unlock 2>/dev/null || true
 
 echo "Replacing files..."
@@ -383,7 +432,7 @@ echo "goose on"
 echo ""
 EOF
 
-chmod +x goose-on.sh goose-off.sh goose-update.sh goose-watch.sh
+chmod +x goose-on.sh goose-off.sh goose-update.sh goose-watch.sh goose-gate.sh goose-handle.sh
 
 mkdir -p "$PREFIX/bin"
 
@@ -406,11 +455,18 @@ case "$1" in
     "$HOME/GO/goose-update.sh"
     ;;
   status)
-    if pgrep -f goose-client >/dev/null; then
-      echo "Goose is ON"
-      echo "SOCKS5: 127.0.0.1:1080"
+    if ss -ltn 2>/dev/null | grep -q ':1080'; then
+      echo "Gate is ON"
+      echo "Public SOCKS5: 127.0.0.1:1080"
     else
-      echo "Goose is OFF"
+      echo "Gate is OFF"
+    fi
+
+    if pgrep -f goose-client >/dev/null; then
+      echo "Goose client is ON"
+      echo "Internal SOCKS5: 127.0.0.1:1081"
+    else
+      echo "Goose client is AUTO STOPPED"
     fi
     ;;
   logs)
