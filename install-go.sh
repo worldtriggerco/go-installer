@@ -78,6 +78,7 @@ pkill -f goose-watch.sh 2>/dev/null || true
 pkill -f goose-gate.sh 2>/dev/null || true
 pkill -f goose-handle.sh 2>/dev/null || true
 pkill -f "socat.*1080" 2>/dev/null || true
+pkill -f "socat.*1081" 2>/dev/null || true
 termux-wake-unlock 2>/dev/null || true
 
 echo "Replacing old installation..."
@@ -114,12 +115,12 @@ if ! pgrep -f goose-client >/dev/null; then
 fi
 
 TRIES=0
-while [ "$TRIES" -lt 20 ]; do
+while [ "$TRIES" -lt 30 ]; do
   if ss -ltn 2>/dev/null | grep -q ':1081'; then
     break
   fi
   TRIES=$((TRIES + 1))
-  sleep 0.5
+  sleep 1
 done
 
 exec socat STDIO TCP:127.0.0.1:1081
@@ -181,6 +182,7 @@ pkill -f goose-watch.sh 2>/dev/null || true
 pkill -f goose-gate.sh 2>/dev/null || true
 pkill -f goose-handle.sh 2>/dev/null || true
 pkill -f "socat.*1080" 2>/dev/null || true
+pkill -f "socat.*1081" 2>/dev/null || true
 
 rm -f goose.log
 rm -f .last_socks_activity
@@ -190,16 +192,27 @@ date +%s > "$HOME/GO/.last_socks_activity"
 nohup ./goose-gate.sh > /dev/null 2>&1 &
 nohup ./goose-watch.sh > /dev/null 2>&1 &
 
-sleep 2
+sleep 3
 
-if ! pgrep -f goose-gate.sh >/dev/null && ! ss -ltn 2>/dev/null | grep -q ':1080'; then
+if ! ss -ltn 2>/dev/null | grep -q ':1080'; then
+  sleep 2
+fi
+
+if ! ss -ltn 2>/dev/null | grep -q ':1080'; then
   clear
   echo ""
   echo "======================================="
   echo "            GOOSE GATE FAILED"
   echo "======================================="
   echo ""
+  echo "Gate log:"
   tail -n 40 goose.log 2>/dev/null
+  echo ""
+  echo "Open ports:"
+  ss -ltn 2>/dev/null
+  echo ""
+  echo "Processes:"
+  ps aux 2>/dev/null | grep -E 'socat|goose' | grep -v grep
   exit 1
 fi
 
@@ -311,6 +324,7 @@ pkill -f goose-watch.sh 2>/dev/null || true
 pkill -f goose-gate.sh 2>/dev/null || true
 pkill -f goose-handle.sh 2>/dev/null || true
 pkill -f "socat.*1080" 2>/dev/null || true
+pkill -f "socat.*1081" 2>/dev/null || true
 termux-wake-unlock 2>/dev/null || true
 
 echo "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⡤⠒⠒⠢⢄⡀⠀⠀⢠⡏⠉⠉⠉⠑⠒⠤⣀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀"
@@ -414,6 +428,7 @@ pkill -f goose-watch.sh 2>/dev/null || true
 pkill -f goose-gate.sh 2>/dev/null || true
 pkill -f goose-handle.sh 2>/dev/null || true
 pkill -f "socat.*1080" 2>/dev/null || true
+pkill -f "socat.*1081" 2>/dev/null || true
 termux-wake-unlock 2>/dev/null || true
 
 echo "Replacing files..."
