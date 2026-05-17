@@ -116,12 +116,14 @@ fi
 
 TRIES=0
 while [ "$TRIES" -lt 30 ]; do
-  if ss -ltn 2>/dev/null | grep -q ':1081'; then
+  if pgrep -f goose-client >/dev/null; then
     break
   fi
   TRIES=$((TRIES + 1))
   sleep 1
 done
+
+sleep 2
 
 exec socat STDIO TCP:127.0.0.1:1081
 EOF
@@ -150,9 +152,9 @@ LAST_ACTIVE_FILE="$HOME/GO/.last_socks_activity"
 date +%s > "$LAST_ACTIVE_FILE"
 
 while true; do
-  GATE_ACTIVE="$(ss -tn 2>/dev/null | grep -E ':1080|:1081' | grep ESTAB | wc -l | tr -d ' ')"
+  GATE_ACTIVE="$(ps aux 2>/dev/null | grep -E 'socat.*1080|socat.*1081|goose-handle.sh' | grep -v grep | wc -l | tr -d ' ')"
 
-  if [ "$GATE_ACTIVE" -gt 0 ]; then
+  if [ "$GATE_ACTIVE" -gt 1 ]; then
     date +%s > "$LAST_ACTIVE_FILE"
   else
     LAST_ACTIVE="$(cat "$LAST_ACTIVE_FILE" 2>/dev/null || echo 0)"
@@ -194,11 +196,11 @@ nohup ./goose-watch.sh > /dev/null 2>&1 &
 
 sleep 3
 
-if ! ss -ltn 2>/dev/null | grep -q ':1080'; then
+if ! pgrep -f "socat TCP-LISTEN:1080" >/dev/null; then
   sleep 2
 fi
 
-if ! ss -ltn 2>/dev/null | grep -q ':1080'; then
+if ! pgrep -f "socat TCP-LISTEN:1080" >/dev/null; then
   clear
   echo ""
   echo "======================================="
@@ -208,9 +210,6 @@ if ! ss -ltn 2>/dev/null | grep -q ':1080'; then
   echo "Gate log:"
   tail -n 40 goose.log 2>/dev/null
   echo ""
-  echo "Open ports:"
-  ss -ltn 2>/dev/null
-  echo ""
   echo "Processes:"
   ps aux 2>/dev/null | grep -E 'socat|goose' | grep -v grep
   exit 1
@@ -219,22 +218,6 @@ fi
 while true; do
   clear
 
-  echo "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣠⣤⣄⡀⠀⠀⠀⠀⠀⠀"
-  echo "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢠⣿⣿⣏⣹⣿⠄⠀⠀⠀⠀⠀"
-  echo "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢸⣿⣿⣿⠿⠋⢠⣷⣦⠀⠀⠀"
-  echo "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢸⣿⣿⡇⠀⠀⠀⠀⠀⠀⠀⠀"
-  echo "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢸⣿⣿⣧⠀⠀⠀⠀⠀⠀⠀⠀"
-  echo "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣿⣿⣿⣆⠀⠀⠀⠀⠀⠀⠀"
-  echo "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣀⣿⣿⣿⣿⡆⠀⠀⠀⠀⠀⠀"
-  echo "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣤⣶⣿⣿⣿⠛⣿⣿⣿⣧⠀⠀⠀⠀⠀⠀"
-  echo "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣠⣾⣿⣿⣿⣿⣿⣿⡇⢸⣿⣿⣿⠀⠀⠀⠀⠀⠀"
-  echo "⠀⠀⠀⠀⠀⠀⠀⠀⣠⣴⣿⣿⣿⣿⣿⣿⣿⣿⣿⠇⢸⣿⣿⡿⠀⠀⠀⠀⠀⠀"
-  echo "⠀⠀⠀⠀⢀⣠⣴⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠿⠋⣠⣿⣿⣿⠇⠀⠀⠀⠀⠀⠀"
-  echo "⠀⠀⠰⢾⣿⣿⣿⡟⠿⠿⣿⣿⠿⠿⠛⠋⣁⣴⣾⣿⣿⠿⠋⠀⠀⠀⠀⠀⠀⠀"
-  echo "⠀⠀⠀⠀⠉⠛⠻⠷⣶⣤⣤⣤⣤⣶⣾⣿⡿⠿⠛⠉⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀"
-  echo "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣠⢀⣶⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀"
-  echo "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠘⠛⠛⠛⠛⠛⠂⠀⠀⠀⠀"
-  echo ""
   echo "======================================="
   echo "          GOOSE RELAY GATE ONLINE"
   echo "======================================="
@@ -248,7 +231,7 @@ while true; do
   echo "          127.0.0.1:1081"
   echo ""
 
-  if ss -ltn 2>/dev/null | grep -q ':1080'; then
+  if pgrep -f "socat TCP-LISTEN:1080" >/dev/null; then
     GATE_STATUS="RUNNING"
   else
     GATE_STATUS="OFF"
@@ -260,13 +243,13 @@ while true; do
     CLIENT_STATUS="AUTO STOPPED - WAITING FOR SOCKS USE"
   fi
 
-  ACTIVE_CONN="$(ss -tn 2>/dev/null | grep -E ':1080|:1081' | grep ESTAB | wc -l | tr -d ' ')"
+  ACTIVE_CONN="$(ps aux 2>/dev/null | grep -E 'socat.*1080|socat.*1081|goose-handle.sh' | grep -v grep | wc -l | tr -d ' ')"
 
   echo "AUTO CONTROL STATUS:"
   echo ""
   echo "          GATE STATUS       : $GATE_STATUS"
   echo "          CLIENT STATUS     : $CLIENT_STATUS"
-  echo "          ACTIVE CONNECTIONS: $ACTIVE_CONN"
+  echo "          ACTIVE PROCESSES  : $ACTIVE_CONN"
   echo "          AUTO STOP AFTER   : 10 IDLE MINUTES"
   echo ""
 
@@ -327,23 +310,6 @@ pkill -f "socat.*1080" 2>/dev/null || true
 pkill -f "socat.*1081" 2>/dev/null || true
 termux-wake-unlock 2>/dev/null || true
 
-echo "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⡤⠒⠒⠢⢄⡀⠀⠀⢠⡏⠉⠉⠉⠑⠒⠤⣀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀"
-echo "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⡞⠀⠀⠀⠀⠀⠙⢦⠀⡇⡇⠀⠀⠀⠀⠀⠀⠈⠱⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀"
-echo "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣠⠊⠉⠉⠙⠒⢤⡀⠀⣼⠀⠀⢀⣶⣤⠀⠀⠀⢣⡇⡇⠀⠀⢴⣶⣦⠀⠀⠀⢳⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀"
-echo "⠀⠀⠀⢀⣠⠤⢄⠀⠀⢰⡇⠀⠀⣠⣀⠀⠀⠈⢦⡿⡀⠀⠈⡟⣟⡇⠀⠀⢸⡇⡆⠀⠀⡼⢻⣠⠀⠀⠀⣸⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀"
-echo "⠀⢀⠖⠉⠀⠀⠀⣱⡀⡞⡇⠀⠀⣿⣿⢣⠀⠀⠈⣧⣣⠀⠀⠉⠋⠀⠀⠀⣸⡇⠇⠀⠀⠈⠉⠀⠀⠀⢀⡏⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀"
-echo "⣠⠏⠀⠀⣴⢴⣿⣿⠗⢷⡹⡀⠀⠘⠾⠾⠀⠀⠀⣿⣿⣧⡀⠀⠀⠀⢀⣴⠇⣇⣆⣀⢀⣀⣀⣀⣀⣤⠟⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀"
-echo "⣿⠀⠀⢸⢻⡞⠋⠀⠀⠀⢿⣷⣄⠀⠀⠀⠀⠀⣠⡇⠙⢿⣽⣷⣶⣶⣿⠋⢰⣿⣿⣿⣿⣿⣿⠿⠛⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀"
-echo "⡿⡄⠀⠈⢻⣝⣶⣶⠀⠀⠀⣿⣿⣱⣶⣶⣶⣾⡟⠀⠀⠀⢈⡉⠉⢩⡖⠒⠈⠉⡏⡴⡏⠉⠉⠉⠉⠉⠉⠉⠉⡇⠀⠀⢀⣴⠒⠢⠤⣀"
-echo "⢣⣸⣆⡀⠀⠈⠉⠁⠀⠀⣠⣷⠈⠙⠛⠛⠛⠉⢀⣴⡊⠉⠁⠈⢢⣿⠀⠀⠀⢸⠡⠀⠁⠀⠀⠀⣠⣀⣀⣀⣀⡇⠀⢰⢁⡇⠀⠀⠀⢠"
-echo "⠀⠻⣿⣟⢦⣤⡤⣤⣴⣾⡿⢃⡠⠔⠒⠉⠛⠢⣾⢿⣿⣦⡀⠀⠀⠉⠀⠀⢀⡇⢸⠀⠀⠀⠀⠀⠿⠿⠿⣿⡟⠀⢀⠇⢸⠀⠀⠀⠀⠘"
-echo "⠀⠀⠈⠙⠛⠿⠿⠿⠛⠋⢰⡋⠀⠀⢠⣤⡄⠀⠈⡆⠙⢿⣿⣦⣀⠀⠀⠀⣜⠀⢸⠀⠀⠀⠀⠀⠀⠀⠀⢀⠃⠀⡸⠀⠇⠀⠀⠀⠀⠀"
-echo "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡇⢣⠀⠀⠈⠛⠁⠀⢴⠥⡀⠀⠙⢿⡿⡆⠀⠀⢸⠀⢸⢰⠀⠀⠀⢀⣿⣶⣶⡾⠀⢀⠇⣸⠀⠀⠀⠀⠀⠀"
-echo "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠹⡀⢇⠀⠀⠀⢀⡀⠀⠀⠈⢢⠀⠀⢃⢱⠀⠀⠀⡇⢸⢸⠀⠀⠀⠈⠉⠉⠉⢱⠀⠼⣾⣿⣿⣷⣦⠴⠀⠀"
-echo "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢱⠘⡄⠀⠀⢹⣿⡇⠀⠀⠈⡆⠀⢸⠈⡇⢀⣀⣵⢨⣸⣦⣤⣤⣄⣀⣀⣀⡞⠀⣠⡞⠉⠈⠉⢣⡀⠀⠀"
-echo "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢃⠘⡄⠀⠀⠉⠀⠀⣠⣾⠁⠀⠀⣧⣿⣿⡿⠃⠸⠿⣿⣿⣿⣿⣿⣿⠟⠁⣼⣾⠀⠀⠀⠀⢠⠇⠀⠀"
-echo "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠘⡄⠹⣀⣀⣤⣶⣿⡿⠃⠀⠀⠀⠈⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⠁⠀⠀⢻⣿⣷⣦⣤⣤⠎⠀⠀⠀"
-echo "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠘⣤⣿⡿⠟⠛⠉⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⠉⠉⠉⠀⠀⠀⠀⠀"
 echo ""
 echo "======================================="
 echo "            GOOSE RELAY OFF"
@@ -470,7 +436,7 @@ case "$1" in
     "$HOME/GO/goose-update.sh"
     ;;
   status)
-    if ss -ltn 2>/dev/null | grep -q ':1080'; then
+    if pgrep -f "socat TCP-LISTEN:1080" >/dev/null; then
       echo "Gate is ON"
       echo "Public SOCKS5: 127.0.0.1:1080"
     else
