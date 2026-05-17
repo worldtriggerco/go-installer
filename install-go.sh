@@ -101,13 +101,11 @@ cat > goose-gate.go << 'EOF'
 package main
 
 import (
-	"fmt"
 	"io"
 	"net"
 	"os"
 	"os/exec"
 	"strconv"
-	"strings"
 	"sync/atomic"
 	"time"
 )
@@ -180,9 +178,11 @@ func countdownLoop() {
 			last := atomic.LoadInt64(&lastActiveUnix)
 			idle := int(time.Now().Unix() - last)
 			left := idleLimitSeconds - idle
+
 			if left < 0 {
 				left = 0
 			}
+
 			writeFile(".idle_countdown", strconv.Itoa(left))
 
 			if idle >= idleLimitSeconds {
@@ -202,10 +202,15 @@ func countdownLoop() {
 	}
 }
 
-func pipe(dst net.Conn, src net.Conn) {
+func pipe(dst net.Conn, src net.Conn, done chan bool) {
 	_, _ = io.Copy(dst, src)
 	_ = dst.Close()
 	_ = src.Close()
+
+	select {
+	case done <- true:
+	default:
+	}
 }
 
 func handleConn(client net.Conn) {
@@ -232,25 +237,28 @@ func handleConn(client net.Conn) {
 	if err != nil {
 		appendLog("GATE ERROR - cannot connect to internal Goose 1081: " + err.Error())
 		_ = client.Close()
+
 		atomic.AddInt64(&activeConnections, -1)
+		if atomic.LoadInt64(&activeConnections) < 0 {
+			atomic.StoreInt64(&activeConnections, 0)
+		}
 		writeFile(".active_connections", strconv.FormatInt(atomic.LoadInt64(&activeConnections), 10))
 		return
 	}
 
-	go pipe(upstream, client)
-	go pipe(client, upstream)
+	done := make(chan bool, 2)
 
-	for {
-		time.Sleep(1 * time.Second)
-		if strings.Contains(fmt.Sprintf("%v", client), "<nil>") {
-			break
-		}
-	}
+	go pipe(upstream, client, done)
+	go pipe(client, upstream, done)
+
+	<-done
 
 	atomic.AddInt64(&activeConnections, -1)
+
 	if atomic.LoadInt64(&activeConnections) < 0 {
 		atomic.StoreInt64(&activeConnections, 0)
 	}
+
 	writeFile(".active_connections", strconv.FormatInt(atomic.LoadInt64(&activeConnections), 10))
 }
 
