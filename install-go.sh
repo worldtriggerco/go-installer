@@ -105,22 +105,8 @@ cd "$HOME/GO" || exit 1
 IDLE_LIMIT_SECONDS=600
 CHECK_SECONDS=15
 LAST_ACTIVE_FILE="$HOME/GO/.last_socks_activity"
-STATE_FILE="$HOME/GO/.goose_state"
-
-notify_goose() {
-  TITLE="$1"
-  MSG="$2"
-
-  if command -v termux-notification >/dev/null 2>&1; then
-    termux-notification \
-      --title "$TITLE" \
-      --content "$MSG" \
-      --priority high >/dev/null 2>&1 || true
-  fi
-}
 
 date +%s > "$LAST_ACTIVE_FILE"
-echo "RUNNING" > "$STATE_FILE"
 
 while true; do
   ACTIVE_CONN="$(ss -tn 2>/dev/null | grep ':1080' | grep ESTAB | wc -l | tr -d ' ')"
@@ -130,12 +116,8 @@ while true; do
 
     if ! pgrep -f goose-client >/dev/null; then
       termux-wake-lock 2>/dev/null || true
-      echo "RUNNING" > "$STATE_FILE"
       echo "$(date '+%H:%M:%S') AUTO START - SOCKS activity detected" >> goose.log
-      notify_goose "GooseRelayVPN" "Goose started automatically"
       nohup ./goose-client -config client_config.json >> goose.log 2>&1 &
-    else
-      echo "RUNNING" > "$STATE_FILE"
     fi
   else
     LAST_ACTIVE="$(cat "$LAST_ACTIVE_FILE" 2>/dev/null || echo 0)"
@@ -145,12 +127,8 @@ while true; do
     if [ "$IDLE_TIME" -ge "$IDLE_LIMIT_SECONDS" ]; then
       if pgrep -f goose-client >/dev/null; then
         echo "$(date '+%H:%M:%S') AUTO STOP - no SOCKS activity for 10 minutes" >> goose.log
-        echo "AUTO STOPPED" > "$STATE_FILE"
-        notify_goose "GooseRelayVPN" "Goose stopped after 10 minutes idle"
         pkill -f goose-client 2>/dev/null || true
         termux-wake-unlock 2>/dev/null || true
-      else
-        echo "AUTO STOPPED" > "$STATE_FILE"
       fi
     fi
   fi
@@ -169,20 +147,11 @@ pkill -f goose-client 2>/dev/null || true
 pkill -f goose-watch.sh 2>/dev/null || true
 rm -f goose.log
 rm -f .last_socks_activity
-rm -f .goose_state
 
 date +%s > "$HOME/GO/.last_socks_activity"
-echo "RUNNING" > "$HOME/GO/.goose_state"
 
 nohup ./goose-client -config client_config.json > goose.log 2>&1 &
 nohup ./goose-watch.sh > /dev/null 2>&1 &
-
-if command -v termux-notification >/dev/null 2>&1; then
-  termux-notification \
-    --title "GooseRelayVPN" \
-    --content "Goose started manually" \
-    --priority high >/dev/null 2>&1 || true
-fi
 
 sleep 4
 
@@ -225,6 +194,26 @@ while true; do
   echo "          127.0.0.1:1080"
   echo ""
 
+  if pgrep -f goose-client >/dev/null; then
+    echo "CLIENT STATUS:"
+    echo ""
+    echo "          RUNNING"
+    echo ""
+  else
+    echo "CLIENT STATUS:"
+    echo ""
+    echo "          AUTO STOPPED - WAITING FOR SOCKS USE"
+    echo ""
+  fi
+
+  ACTIVE_CONN="$(ss -tn 2>/dev/null | grep ':1080' | grep ESTAB | wc -l | tr -d ' ')"
+
+  echo "SOCKS USAGE:"
+  echo ""
+  echo "          ACTIVE CONNECTIONS : $ACTIVE_CONN"
+  echo "          AUTO STOP AFTER    : 10 IDLE MINUTES"
+  echo ""
+
   STATS_LINE="$(grep 'endpoints=' goose.log 2>/dev/null | tail -n 1)"
 
   if echo "$STATS_LINE" | grep -q 'endpoints='; then
@@ -257,27 +246,11 @@ while true; do
   echo "          NETWORK FAILURES  : $NETFAIL"
   echo "          RECOVERED         : $RECOVERED"
   echo ""
-
-  ACTIVE_CONN="$(ss -tn 2>/dev/null | grep ':1080' | grep ESTAB | wc -l | tr -d ' ')"
-
-  if pgrep -f goose-client >/dev/null; then
-    CLIENT_STATE="RUNNING"
-  else
-    CLIENT_STATE="$(cat "$HOME/GO/.goose_state" 2>/dev/null || echo "AUTO STOPPED")"
-  fi
-
-  echo "AUTO CONTROL STATUS:"
-  echo ""
-  echo "          CLIENT STATUS      : $CLIENT_STATE"
-  echo "          ACTIVE SOCKS CONN  : $ACTIVE_CONN"
-  echo "          AUTO STOP AFTER    : 10 IDLE MINUTES"
-  echo "          NOTIFICATION       : ENABLED"
-  echo ""
-
   echo ""
   echo "======================================="
   echo "Press CTRL + C to exit live monitor"
   echo "Goose keeps running in background"
+  echo "Auto stop/start is enabled"
   echo "======================================="
   echo ""
 
@@ -293,15 +266,6 @@ clear
 pkill -f goose-client 2>/dev/null || true
 pkill -f goose-watch.sh 2>/dev/null || true
 termux-wake-unlock 2>/dev/null || true
-
-echo "OFF" > "$HOME/GO/.goose_state" 2>/dev/null || true
-
-if command -v termux-notification >/dev/null 2>&1; then
-  termux-notification \
-    --title "GooseRelayVPN" \
-    --content "Goose stopped manually" \
-    --priority high >/dev/null 2>&1 || true
-fi
 
 echo "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⡤⠒⠒⠢⢄⡀⠀⠀⢠⡏⠉⠉⠉⠑⠒⠤⣀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀"
 echo "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⡞⠀⠀⠀⠀⠀⠙⢦⠀⡇⡇⠀⠀⠀⠀⠀⠀⠈⠱⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀"
