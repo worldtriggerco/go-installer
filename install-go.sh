@@ -150,8 +150,10 @@ cd "$HOME/GO" || exit 1
 IDLE_LIMIT_SECONDS=600
 CHECK_SECONDS=15
 LAST_ACTIVE_FILE="$HOME/GO/.last_socks_activity"
+COUNTDOWN_FILE="$HOME/GO/.idle_countdown"
 
 date +%s > "$LAST_ACTIVE_FILE"
+echo "$IDLE_LIMIT_SECONDS" > "$COUNTDOWN_FILE"
 
 while true; do
   RAW_ACTIVE="$(ps aux 2>/dev/null | grep -E 'socat.*1080|socat.*1081|goose-handle.sh' | grep -v grep | wc -l | tr -d ' ')"
@@ -163,10 +165,18 @@ while true; do
 
   if [ "$ACTIVE_CONN" -gt 0 ]; then
     date +%s > "$LAST_ACTIVE_FILE"
+    echo "$IDLE_LIMIT_SECONDS" > "$COUNTDOWN_FILE"
   else
     LAST_ACTIVE="$(cat "$LAST_ACTIVE_FILE" 2>/dev/null || echo 0)"
     NOW_TIME="$(date +%s)"
     IDLE_TIME=$((NOW_TIME - LAST_ACTIVE))
+    LEFT_TIME=$((IDLE_LIMIT_SECONDS - IDLE_TIME))
+
+    if [ "$LEFT_TIME" -lt 0 ]; then
+      LEFT_TIME=0
+    fi
+
+    echo "$LEFT_TIME" > "$COUNTDOWN_FILE"
 
     if [ "$IDLE_TIME" -ge "$IDLE_LIMIT_SECONDS" ]; then
       if pgrep -f goose-client >/dev/null; then
@@ -195,8 +205,10 @@ pkill -f "socat.*1081" 2>/dev/null || true
 
 rm -f goose.log
 rm -f .last_socks_activity
+rm -f .idle_countdown
 
 date +%s > "$HOME/GO/.last_socks_activity"
+echo "600" > "$HOME/GO/.idle_countdown"
 
 nohup ./goose-gate.sh > /dev/null 2>&1 &
 nohup ./goose-watch.sh > /dev/null 2>&1 &
@@ -273,12 +285,16 @@ while true; do
     ACTIVE_CONN=0
   fi
 
+  LEFT_TIME="$(cat "$HOME/GO/.idle_countdown" 2>/dev/null || echo 600)"
+  LEFT_MIN=$((LEFT_TIME / 60))
+  LEFT_SEC=$((LEFT_TIME % 60))
+
   echo "AUTO CONTROL STATUS:"
   echo ""
   echo "          GATE STATUS       : $GATE_STATUS"
   echo "          CLIENT STATUS     : $CLIENT_STATUS"
   echo "          ACTIVE CONNECTIONS: $ACTIVE_CONN"
-  echo "          AUTO STOP AFTER   : 10 IDLE MINUTES"
+  echo "          AUTO STOP TIMER   : ${LEFT_MIN}m ${LEFT_SEC}s"
   echo ""
 
   STATS_LINE="$(grep 'endpoints=' goose.log 2>/dev/null | tail -n 1)"
