@@ -24,7 +24,7 @@ EXTRACT_DIR="$TMP_DIR/GO-v1.6.0"
 echo "Installing GooseRelayVPN..."
 
 pkg update -y
-pkg install wget p7zip termux-api procps curl grep sed coreutils iproute2 socat -y
+pkg install wget p7zip termux-api procps curl grep sed coreutils golang -y
 
 echo "Downloading package..."
 
@@ -74,11 +74,7 @@ fi
 
 echo "Stopping old Goose..."
 pkill -f goose-client 2>/dev/null || true
-pkill -f goose-watch.sh 2>/dev/null || true
-pkill -f goose-gate.sh 2>/dev/null || true
-pkill -f goose-handle.sh 2>/dev/null || true
-pkill -f "socat.*1080" 2>/dev/null || true
-pkill -f "socat.*1081" 2>/dev/null || true
+pkill -f goose-gate-go 2>/dev/null || true
 termux-wake-unlock 2>/dev/null || true
 
 echo "Replacing old installation..."
@@ -101,136 +97,228 @@ rm -f "$PREFIX/bin/goose"
 cd "$APP_DIR" || exit 1
 chmod +x goose-client
 
-cat > goose-handle.sh << 'EOF'
-#!/data/data/com.termux/files/usr/bin/bash
+cat > goose-gate.go << 'EOF'
+package main
 
-cd "$HOME/GO" || exit 1
+import (
+	"fmt"
+	"io"
+	"net"
+	"os"
+	"os/exec"
+	"strconv"
+	"strings"
+	"sync/atomic"
+	"time"
+)
 
-touch goose.log
+const (
+	publicListen       = "127.0.0.1:1080"
+	internalGoose     = "127.0.0.1:1081"
+	idleLimitSeconds  = 600
+	checkEverySeconds = 5
+)
 
-echo "$(date '+%H:%M:%S') GATE CONNECTION - request received on 1080" >> goose.log
+var activeConnections int64
+var lastActiveUnix int64
 
-if ! pgrep -f goose-client >/dev/null; then
-  termux-wake-lock 2>/dev/null || true
-  echo "$(date '+%H:%M:%S') AUTO START - starting goose-client on internal 1081" >> goose.log
-  nohup ./goose-client -config client_config.json >> goose.log 2>&1 &
-fi
+func writeFile(name string, value string) {
+	_ = os.WriteFile(name, []byte(value), 0644)
+}
 
-TRIES=0
-while [ "$TRIES" -lt 30 ]; do
-  if pgrep -f goose-client >/dev/null; then
-    break
-  fi
-  TRIES=$((TRIES + 1))
-  sleep 1
-done
+func appendLog(msg string) {
+	f, err := os.OpenFile("goose.log", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	now := time.Now().Format("15:04:05")
+	_, _ = f.WriteString(now + " " + msg + "\n")
+}
 
-sleep 2
+func processRunning(name string) bool {
+	cmd := exec.Command("pgrep", "-f", name)
+	err := cmd.Run()
+	return err == nil
+}
 
-exec socat STDIO TCP:127.0.0.1:1081
+func startGoose() {
+	if processRunning("goose-client") {
+		return
+	}
+
+	appendLog("AUTO START - starting goose-client on internal 1081")
+	_ = exec.Command("termux-wake-lock").Run()
+
+	cmd := exec.Command("./goose-client", "-config", "client_config.json")
+	logFile, err := os.OpenFile("goose.log", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err == nil {
+		cmd.Stdout = logFile
+		cmd.Stderr = logFile
+	}
+	_ = cmd.Start()
+}
+
+func stopGoose() {
+	if !processRunning("goose-client") {
+		return
+	}
+
+	appendLog("AUTO STOP - no active SOCKS connection for 10 minutes")
+	_ = exec.Command("pkill", "-f", "goose-client").Run()
+	_ = exec.Command("termux-wake-unlock").Run()
+}
+
+func countdownLoop() {
+	for {
+		active := atomic.LoadInt64(&activeConnections)
+
+		if active > 0 {
+			atomic.StoreInt64(&lastActiveUnix, time.Now().Unix())
+			writeFile(".idle_countdown", strconv.Itoa(idleLimitSeconds))
+		} else {
+			last := atomic.LoadInt64(&lastActiveUnix)
+			idle := int(time.Now().Unix() - last)
+			left := idleLimitSeconds - idle
+			if left < 0 {
+				left = 0
+			}
+			writeFile(".idle_countdown", strconv.Itoa(left))
+
+			if idle >= idleLimitSeconds {
+				stopGoose()
+			}
+		}
+
+		writeFile(".active_connections", strconv.FormatInt(active, 10))
+
+		if processRunning("goose-client") {
+			writeFile(".client_state", "RUNNING")
+		} else {
+			writeFile(".client_state", "AUTO STOPPED - WAITING FOR SOCKS USE")
+		}
+
+		time.Sleep(time.Duration(checkEverySeconds) * time.Second)
+	}
+}
+
+func pipe(dst net.Conn, src net.Conn) {
+	_, _ = io.Copy(dst, src)
+	_ = dst.Close()
+	_ = src.Close()
+}
+
+func handleConn(client net.Conn) {
+	atomic.AddInt64(&activeConnections, 1)
+	atomic.StoreInt64(&lastActiveUnix, time.Now().Unix())
+	writeFile(".idle_countdown", strconv.Itoa(idleLimitSeconds))
+	writeFile(".active_connections", strconv.FormatInt(atomic.LoadInt64(&activeConnections), 10))
+
+	appendLog("GATE CONNECTION - request received on 1080")
+
+	startGoose()
+
+	var upstream net.Conn
+	var err error
+
+	for i := 0; i < 30; i++ {
+		upstream, err = net.DialTimeout("tcp", internalGoose, 2*time.Second)
+		if err == nil {
+			break
+		}
+		time.Sleep(1 * time.Second)
+	}
+
+	if err != nil {
+		appendLog("GATE ERROR - cannot connect to internal Goose 1081: " + err.Error())
+		_ = client.Close()
+		atomic.AddInt64(&activeConnections, -1)
+		writeFile(".active_connections", strconv.FormatInt(atomic.LoadInt64(&activeConnections), 10))
+		return
+	}
+
+	go pipe(upstream, client)
+	go pipe(client, upstream)
+
+	for {
+		time.Sleep(1 * time.Second)
+		if strings.Contains(fmt.Sprintf("%v", client), "<nil>") {
+			break
+		}
+	}
+
+	atomic.AddInt64(&activeConnections, -1)
+	if atomic.LoadInt64(&activeConnections) < 0 {
+		atomic.StoreInt64(&activeConnections, 0)
+	}
+	writeFile(".active_connections", strconv.FormatInt(atomic.LoadInt64(&activeConnections), 10))
+}
+
+func main() {
+	atomic.StoreInt64(&lastActiveUnix, time.Now().Unix())
+	writeFile(".idle_countdown", strconv.Itoa(idleLimitSeconds))
+	writeFile(".active_connections", "0")
+	writeFile(".client_state", "AUTO STOPPED - WAITING FOR SOCKS USE")
+
+	appendLog("GATE STARTED - listening on 127.0.0.1:1080, forwarding to Goose 1081")
+
+	listener, err := net.Listen("tcp", publicListen)
+	if err != nil {
+		appendLog("GATE FAILED - " + err.Error())
+		os.Exit(1)
+	}
+
+	go countdownLoop()
+
+	for {
+		conn, err := listener.Accept()
+		if err != nil {
+			appendLog("GATE ACCEPT ERROR - " + err.Error())
+			continue
+		}
+		go handleConn(conn)
+	}
+}
 EOF
 
-cat > goose-gate.sh << 'EOF'
-#!/data/data/com.termux/files/usr/bin/bash
+echo "Building lightweight Go gate..."
+go build -o goose-gate-go goose-gate.go || {
+  echo "ERROR: failed to build goose-gate-go"
+  exit 1
+}
 
-cd "$HOME/GO" || exit 1
-
-pkill -f "socat.*1080" 2>/dev/null || true
-
-echo "$(date '+%H:%M:%S') GATE STARTED - listening on 127.0.0.1:1080, forwarding to Goose 1081" >> goose.log
-
-exec socat TCP-LISTEN:1080,bind=127.0.0.1,reuseaddr,fork EXEC:"$HOME/GO/goose-handle.sh"
-EOF
-
-cat > goose-watch.sh << 'EOF'
-#!/data/data/com.termux/files/usr/bin/bash
-
-cd "$HOME/GO" || exit 1
-
-IDLE_LIMIT_SECONDS=600
-CHECK_SECONDS=15
-LAST_ACTIVE_FILE="$HOME/GO/.last_socks_activity"
-COUNTDOWN_FILE="$HOME/GO/.idle_countdown"
-
-date +%s > "$LAST_ACTIVE_FILE"
-echo "$IDLE_LIMIT_SECONDS" > "$COUNTDOWN_FILE"
-
-while true; do
-  RAW_ACTIVE="$(ps aux 2>/dev/null | grep -E 'socat.*1080|socat.*1081|goose-handle.sh' | grep -v grep | wc -l | tr -d ' ')"
-  ACTIVE_CONN=$((RAW_ACTIVE - 1))
-
-  if [ "$ACTIVE_CONN" -lt 0 ]; then
-    ACTIVE_CONN=0
-  fi
-
-  if [ "$ACTIVE_CONN" -gt 0 ]; then
-    date +%s > "$LAST_ACTIVE_FILE"
-    echo "$IDLE_LIMIT_SECONDS" > "$COUNTDOWN_FILE"
-  else
-    LAST_ACTIVE="$(cat "$LAST_ACTIVE_FILE" 2>/dev/null || echo 0)"
-    NOW_TIME="$(date +%s)"
-    IDLE_TIME=$((NOW_TIME - LAST_ACTIVE))
-    LEFT_TIME=$((IDLE_LIMIT_SECONDS - IDLE_TIME))
-
-    if [ "$LEFT_TIME" -lt 0 ]; then
-      LEFT_TIME=0
-    fi
-
-    echo "$LEFT_TIME" > "$COUNTDOWN_FILE"
-
-    if [ "$IDLE_TIME" -ge "$IDLE_LIMIT_SECONDS" ]; then
-      if pgrep -f goose-client >/dev/null; then
-        echo "$(date '+%H:%M:%S') AUTO STOP - no active SOCKS connection for 10 minutes" >> goose.log
-        pkill -f goose-client 2>/dev/null || true
-        termux-wake-unlock 2>/dev/null || true
-      fi
-    fi
-  fi
-
-  sleep "$CHECK_SECONDS"
-done
-EOF
+chmod +x goose-gate-go
 
 cat > goose-on.sh << 'EOF'
 #!/data/data/com.termux/files/usr/bin/bash
 
 cd "$HOME/GO" || exit 1
 
+termux-wake-lock 2>/dev/null || true
 pkill -f goose-client 2>/dev/null || true
-pkill -f goose-watch.sh 2>/dev/null || true
-pkill -f goose-gate.sh 2>/dev/null || true
-pkill -f goose-handle.sh 2>/dev/null || true
-pkill -f "socat.*1080" 2>/dev/null || true
-pkill -f "socat.*1081" 2>/dev/null || true
+pkill -f goose-gate-go 2>/dev/null || true
 
 rm -f goose.log
-rm -f .last_socks_activity
 rm -f .idle_countdown
+rm -f .active_connections
+rm -f .client_state
 
-date +%s > "$HOME/GO/.last_socks_activity"
-echo "600" > "$HOME/GO/.idle_countdown"
+echo "600" > .idle_countdown
+echo "0" > .active_connections
+echo "AUTO STOPPED - WAITING FOR SOCKS USE" > .client_state
 
-nohup ./goose-gate.sh > /dev/null 2>&1 &
-nohup ./goose-watch.sh > /dev/null 2>&1 &
+nohup ./goose-gate-go > /dev/null 2>&1 &
 
 sleep 3
 
-if ! pgrep -f "socat TCP-LISTEN:1080" >/dev/null; then
-  sleep 2
-fi
-
-if ! pgrep -f "socat TCP-LISTEN:1080" >/dev/null; then
+if ! pgrep -f goose-gate-go >/dev/null; then
   clear
   echo ""
   echo "======================================="
   echo "            GOOSE GATE FAILED"
   echo "======================================="
   echo ""
-  echo "Gate log:"
   tail -n 40 goose.log 2>/dev/null
-  echo ""
-  echo "Processes:"
-  ps aux 2>/dev/null | grep -E 'socat|goose' | grep -v grep
   exit 1
 fi
 
@@ -266,7 +354,7 @@ while true; do
   echo "          127.0.0.1:1081"
   echo ""
 
-  if pgrep -f "socat TCP-LISTEN:1080" >/dev/null; then
+  if pgrep -f goose-gate-go >/dev/null; then
     GATE_STATUS="RUNNING"
   else
     GATE_STATUS="OFF"
@@ -275,17 +363,11 @@ while true; do
   if pgrep -f goose-client >/dev/null; then
     CLIENT_STATUS="RUNNING"
   else
-    CLIENT_STATUS="AUTO STOPPED - WAITING FOR SOCKS USE"
+    CLIENT_STATUS="$(cat .client_state 2>/dev/null || echo 'AUTO STOPPED - WAITING FOR SOCKS USE')"
   fi
 
-  RAW_ACTIVE="$(ps aux 2>/dev/null | grep -E 'socat.*1080|socat.*1081|goose-handle.sh' | grep -v grep | wc -l | tr -d ' ')"
-  ACTIVE_CONN=$((RAW_ACTIVE - 1))
-
-  if [ "$ACTIVE_CONN" -lt 0 ]; then
-    ACTIVE_CONN=0
-  fi
-
-  LEFT_TIME="$(cat "$HOME/GO/.idle_countdown" 2>/dev/null || echo 600)"
+  ACTIVE_CONN="$(cat .active_connections 2>/dev/null || echo 0)"
+  LEFT_TIME="$(cat .idle_countdown 2>/dev/null || echo 600)"
   LEFT_MIN=$((LEFT_TIME / 60))
   LEFT_SEC=$((LEFT_TIME % 60))
 
@@ -347,11 +429,7 @@ cat > goose-off.sh << 'EOF'
 clear
 
 pkill -f goose-client 2>/dev/null || true
-pkill -f goose-watch.sh 2>/dev/null || true
-pkill -f goose-gate.sh 2>/dev/null || true
-pkill -f goose-handle.sh 2>/dev/null || true
-pkill -f "socat.*1080" 2>/dev/null || true
-pkill -f "socat.*1081" 2>/dev/null || true
+pkill -f goose-gate-go 2>/dev/null || true
 termux-wake-unlock 2>/dev/null || true
 
 echo "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⡤⠒⠒⠢⢄⡀⠀⠀⢠⡏⠉⠉⠉⠑⠒⠤⣀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀"
@@ -451,11 +529,7 @@ fi
 
 echo "Stopping Goose..."
 pkill -f goose-client 2>/dev/null || true
-pkill -f goose-watch.sh 2>/dev/null || true
-pkill -f goose-gate.sh 2>/dev/null || true
-pkill -f goose-handle.sh 2>/dev/null || true
-pkill -f "socat.*1080" 2>/dev/null || true
-pkill -f "socat.*1081" 2>/dev/null || true
+pkill -f goose-gate-go 2>/dev/null || true
 termux-wake-unlock 2>/dev/null || true
 
 echo "Replacing files..."
@@ -474,7 +548,7 @@ echo "goose on"
 echo ""
 EOF
 
-chmod +x goose-on.sh goose-off.sh goose-update.sh goose-watch.sh goose-gate.sh goose-handle.sh
+chmod +x goose-on.sh goose-off.sh goose-update.sh goose-gate-go
 
 mkdir -p "$PREFIX/bin"
 
@@ -497,7 +571,7 @@ case "$1" in
     "$HOME/GO/goose-update.sh"
     ;;
   status)
-    if pgrep -f "socat TCP-LISTEN:1080" >/dev/null; then
+    if pgrep -f goose-gate-go >/dev/null; then
       echo "Gate is ON"
       echo "Public SOCKS5: 127.0.0.1:1080"
     else
