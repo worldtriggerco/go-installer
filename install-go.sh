@@ -113,7 +113,7 @@ import (
 const (
 	publicListen       = "127.0.0.1:1080"
 	internalGoose     = "127.0.0.1:1081"
-	idleLimitSeconds  = 600
+	idleLimitSeconds  = 180
 	checkEverySeconds = 5
 )
 
@@ -130,41 +130,58 @@ func appendLog(msg string) {
 		return
 	}
 	defer f.Close()
+
 	now := time.Now().Format("15:04:05")
 	_, _ = f.WriteString(now + " " + msg + "\n")
 }
 
-func processRunning(name string) bool {
-	cmd := exec.Command("pgrep", "-f", name)
-	err := cmd.Run()
-	return err == nil
+func gooseReady() bool {
+	conn, err := net.DialTimeout("tcp", internalGoose, 800*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
 }
 
 func startGoose() {
-	if processRunning("goose-client") {
+	if gooseReady() {
+		writeFile(".client_state", "RUNNING")
 		return
 	}
 
 	appendLog("AUTO START - starting goose-client on internal 1081")
+	writeFile(".client_state", "STARTING")
 	_ = exec.Command("termux-wake-lock").Run()
 
 	cmd := exec.Command("./goose-client", "-config", "client_config.json")
+
 	logFile, err := os.OpenFile("goose.log", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 	if err == nil {
 		cmd.Stdout = logFile
 		cmd.Stderr = logFile
 	}
+
 	_ = cmd.Start()
 }
 
 func stopGoose() {
-	if !processRunning("goose-client") {
+	if !gooseReady() {
+		writeFile(".client_state", "AUTO STOPPED - WAITING FOR SOCKS USE")
 		return
 	}
 
-	appendLog("AUTO STOP - no active SOCKS connection for 10 minutes")
+	appendLog("AUTO STOP - no active SOCKS connection for 3 minutes")
 	_ = exec.Command("pkill", "-f", "goose-client").Run()
 	_ = exec.Command("termux-wake-unlock").Run()
+
+	time.Sleep(2 * time.Second)
+
+	if gooseReady() {
+		writeFile(".client_state", "STOPPING")
+	} else {
+		writeFile(".client_state", "AUTO STOPPED - WAITING FOR SOCKS USE")
+	}
 }
 
 func countdownLoop() {
@@ -192,7 +209,7 @@ func countdownLoop() {
 
 		writeFile(".active_connections", strconv.FormatInt(active, 10))
 
-		if processRunning("goose-client") {
+		if gooseReady() {
 			writeFile(".client_state", "RUNNING")
 		} else {
 			writeFile(".client_state", "AUTO STOPPED - WAITING FOR SOCKS USE")
@@ -216,6 +233,7 @@ func pipe(dst net.Conn, src net.Conn, done chan bool) {
 func handleConn(client net.Conn) {
 	atomic.AddInt64(&activeConnections, 1)
 	atomic.StoreInt64(&lastActiveUnix, time.Now().Unix())
+
 	writeFile(".idle_countdown", strconv.Itoa(idleLimitSeconds))
 	writeFile(".active_connections", strconv.FormatInt(atomic.LoadInt64(&activeConnections), 10))
 
@@ -239,9 +257,11 @@ func handleConn(client net.Conn) {
 		_ = client.Close()
 
 		atomic.AddInt64(&activeConnections, -1)
+
 		if atomic.LoadInt64(&activeConnections) < 0 {
 			atomic.StoreInt64(&activeConnections, 0)
 		}
+
 		writeFile(".active_connections", strconv.FormatInt(atomic.LoadInt64(&activeConnections), 10))
 		return
 	}
@@ -264,6 +284,7 @@ func handleConn(client net.Conn) {
 
 func main() {
 	atomic.StoreInt64(&lastActiveUnix, time.Now().Unix())
+
 	writeFile(".idle_countdown", strconv.Itoa(idleLimitSeconds))
 	writeFile(".active_connections", "0")
 	writeFile(".client_state", "AUTO STOPPED - WAITING FOR SOCKS USE")
@@ -284,6 +305,7 @@ func main() {
 			appendLog("GATE ACCEPT ERROR - " + err.Error())
 			continue
 		}
+
 		go handleConn(conn)
 	}
 }
@@ -311,7 +333,7 @@ rm -f .idle_countdown
 rm -f .active_connections
 rm -f .client_state
 
-echo "600" > .idle_countdown
+echo "180" > .idle_countdown
 echo "0" > .active_connections
 echo "AUTO STOPPED - WAITING FOR SOCKS USE" > .client_state
 
@@ -368,14 +390,10 @@ while true; do
     GATE_STATUS="OFF"
   fi
 
-  if pgrep -f goose-client >/dev/null; then
-    CLIENT_STATUS="RUNNING"
-  else
-    CLIENT_STATUS="$(cat .client_state 2>/dev/null || echo 'AUTO STOPPED - WAITING FOR SOCKS USE')"
-  fi
-
+  CLIENT_STATUS="$(cat .client_state 2>/dev/null || echo 'AUTO STOPPED - WAITING FOR SOCKS USE')"
   ACTIVE_CONN="$(cat .active_connections 2>/dev/null || echo 0)"
-  LEFT_TIME="$(cat .idle_countdown 2>/dev/null || echo 600)"
+  LEFT_TIME="$(cat .idle_countdown 2>/dev/null || echo 180)"
+
   LEFT_MIN=$((LEFT_TIME / 60))
   LEFT_SEC=$((LEFT_TIME % 60))
 
@@ -440,24 +458,6 @@ pkill -f goose-client 2>/dev/null || true
 pkill -f goose-gate-go 2>/dev/null || true
 termux-wake-unlock 2>/dev/null || true
 
-echo "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⡤⠒⠒⠢⢄⡀⠀⠀⢠⡏⠉⠉⠉⠑⠒⠤⣀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀"
-echo "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⡞⠀⠀⠀⠀⠀⠙⢦⠀⡇⡇⠀⠀⠀⠀⠀⠀⠈⠱⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀"
-echo "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣠⠊⠉⠉⠙⠒⢤⡀⠀⣼⠀⠀⢀⣶⣤⠀⠀⠀⢣⡇⡇⠀⠀⢴⣶⣦⠀⠀⠀⢳⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀"
-echo "⠀⠀⠀⢀⣠⠤⢄⠀⠀⢰⡇⠀⠀⣠⣀⠀⠀⠈⢦⡿⡀⠀⠈⡟⣟⡇⠀⠀⢸⡇⡆⠀⠀⡼⢻⣠⠀⠀⠀⣸⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀"
-echo "⠀⢀⠖⠉⠀⠀⠀⣱⡀⡞⡇⠀⠀⣿⣿⢣⠀⠀⠈⣧⣣⠀⠀⠉⠋⠀⠀⠀⣸⡇⠇⠀⠀⠈⠉⠀⠀⠀⢀⡏⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀"
-echo "⣠⠏⠀⠀⣴⢴⣿⣿⠗⢷⡹⡀⠀⠘⠾⠾⠀⠀⠀⣿⣿⣧⡀⠀⠀⠀⢀⣴⠇⣇⣆⣀⢀⣀⣀⣀⣀⣤⠟⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀"
-echo "⣿⠀⠀⢸⢻⡞⠋⠀⠀⠀⢿⣷⣄⠀⠀⠀⠀⠀⣠⡇⠙⢿⣽⣷⣶⣶⣿⠋⢰⣿⣿⣿⣿⣿⣿⠿⠛⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀"
-echo "⡿⡄⠀⠈⢻⣝⣶⣶⠀⠀⠀⣿⣿⣱⣶⣶⣶⣾⡟⠀⠀⠀⢈⡉⠉⢩⡖⠒⠈⠉⡏⡴⡏⠉⠉⠉⠉⠉⠉⠉⠉⡇⠀⠀⢀⣴⠒⠢⠤⣀"
-echo "⢣⣸⣆⡀⠀⠈⠉⠁⠀⠀⣠⣷⠈⠙⠛⠛⠛⠉⢀⣴⡊⠉⠁⠈⢢⣿⠀⠀⠀⢸⠡⠀⠁⠀⠀⠀⣠⣀⣀⣀⣀⡇⠀⢰⢁⡇⠀⠀⠀⢠"
-echo "⠀⠻⣿⣟⢦⣤⡤⣤⣴⣾⡿⢃⡠⠔⠒⠉⠛⠢⣾⢿⣿⣦⡀⠀⠀⠉⠀⠀⢀⡇⢸⠀⠀⠀⠀⠀⠿⠿⠿⣿⡟⠀⢀⠇⢸⠀⠀⠀⠀⠘"
-echo "⠀⠀⠈⠙⠛⠿⠿⠿⠛⠋⢰⡋⠀⠀⢠⣤⡄⠀⠈⡆⠙⢿⣿⣦⣀⠀⠀⠀⣜⠀⢸⠀⠀⠀⠀⠀⠀⠀⠀⢀⠃⠀⡸⠀⠇⠀⠀⠀⠀⠀"
-echo "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡇⢣⠀⠀⠈⠛⠁⠀⢴⠥⡀⠀⠙⢿⡿⡆⠀⠀⢸⠀⢸⢰⠀⠀⠀⢀⣿⣶⣶⡾⠀⢀⠇⣸⠀⠀⠀⠀⠀⠀"
-echo "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠹⡀⢇⠀⠀⠀⢀⡀⠀⠀⠈⢢⠀⠀⢃⢱⠀⠀⠀⡇⢸⢸⠀⠀⠀⠈⠉⠉⠉⢱⠀⠼⣾⣿⣿⣷⣦⠴⠀⠀"
-echo "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢱⠘⡄⠀⠀⢹⣿⡇⠀⠀⠈⡆⠀⢸⠈⡇⢀⣀⣵⢨⣸⣦⣤⣤⣄⣀⣀⣀⡞⠀⣠⡞⠉⠈⠉⢣⡀⠀⠀"
-echo "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢃⠘⡄⠀⠀⠉⠀⠀⣠⣾⠁⠀⠀⣧⣿⣿⡿⠃⠸⠿⣿⣿⣿⣿⣿⣿⠟⠁⣼⣾⠀⠀⠀⠀⢠⠇⠀⠀"
-echo "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠘⡄⠹⣀⣀⣤⣶⣿⡿⠃⠀⠀⠀⠈⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⠁⠀⠀⢻⣿⣷⣦⣤⣤⠎⠀⠀⠀"
-echo "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠘⣤⣿⡿⠟⠛⠉⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⠉⠉⠉⠀⠀⠀⠀⠀"
-echo ""
 echo "======================================="
 echo "            GOOSE RELAY OFF"
 echo "======================================="
@@ -586,7 +586,7 @@ case "$1" in
       echo "Gate is OFF"
     fi
 
-    if pgrep -f goose-client >/dev/null; then
+    if cat "$HOME/GO/.client_state" 2>/dev/null | grep -q RUNNING; then
       echo "Goose client is ON"
       echo "Internal SOCKS5: 127.0.0.1:1081"
     else
